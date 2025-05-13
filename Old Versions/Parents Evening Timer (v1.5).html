@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Parents Evening Timer</title>
+  <!-- Add Google Font link -->
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+```
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: "Poppins", sans-serif;
+  text-align: center;
+  padding: 2rem;
+  background: linear-gradient(-45deg, #041e42, #000000);
+  background-size: 400% 400%;
+  animation: gradient 30s ease infinite;
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  position: relative;
+}
+
+body::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: url('logo.png') center center no-repeat;
+  background-size: contain;
+  opacity: 0.05;
+  z-index: 0;
+}
+
+@keyframes gradient {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+@keyframes pulse {
+```
+
+0% {
+box-shadow: 0 0 0px #a8996e;
+}
+50% {
+box-shadow: 0 0 50px #a8996e;
+}
+100% {
+box-shadow: 0 0 0px #a8996e;
+}
+}
+
+```
+h1, .label, #clock, #timerDisplay, #progressBarContainer, #setupPanel, #message {
+  position: relative;
+  z-index: 1;
+}
+
+h1 {
+  font-size: 2.5rem;
+  margin-bottom: 2rem;
+}
+
+.label {
+  font-size: 3rem;
+  margin-top: 1rem;
+}
+
+#clock {
+  font-size: 6rem;
+  margin-bottom: 2rem;
+}
+
+#timerDisplay {
+  font-size: 8rem;
+  font-weight: bold;
+  color: #A8996E;
+  margin: 0.1rem 0;
+  transition: font-size 0.5s ease;
+}
+
+#progressBarContainer {
+  width: 80%;
+  height: 30px;
+  background: rgba(68, 68, 68, 0.5);
+  margin: 3rem auto 1rem auto;
+  border-radius: 15px;
+  overflow: hidden;
+}
+
+#progressBar {
+  height: 100%;
+  background: #A8996E;
+  width: 100%;
+  transition: width 0.25s linear;
+  animation: pulse 1s infinite;
+}
+
+#message {
+  font-size: 2rem;
+  color: red;
+  font-weight: bold;
+  margin-top: 2rem;
+  display: none;
+}
+```
+
+#overlay {
+position: fixed;
+top: 0;
+left: 0;
+width: 100%;
+height: 100%;
+background: rgba(0, 0, 0, 0.7);
+display: flex;
+align-items: center;
+justify-content: center;
+z-index: 10;
+transition: opacity 0.5s ease;
+}
+
+#setupPanel {
+background: rgba(255, 255, 255, 0.1); /\* light glassy tint */
+backdrop-filter: blur(10px);          /* background blur */
+-webkit-backdrop-filter: blur(10px);  /* for Safari */
+color: #ffffff;
+padding: 2rem;
+border-radius: 1rem;
+border: 2px solid #a8996E; /* Adding a 2px border with the specified color \*/
+box-shadow: 0 0 20px rgba(0,0,0,0.5);
+max-width: 500px;
+width: 90%;
+text-align: center;
+}
+
+#setupPanel h2 {
+margin-bottom: 1.5rem;
+}
+
+#setupPanel .form-group {
+margin-bottom: 1.2rem;
+display: flex;
+flex-direction: column;
+align-items: flex-start;
+}
+
+#setupPanel label {
+margin-bottom: 0.4rem;
+font-weight: bold;
+font-size: 0.9rem;
+color: #e0e0e0;
+}
+
+#setupPanel .inline-inputs {
+display: flex;
+gap: 0.5rem;
+flex-wrap: wrap;
+align-items: center;
+}
+
+#setupPanel input:[type="number"],
+#setupPanel input:[type="time"],
+#setupPanel input:[type="text"] {
+width: 100%;
+max-width: 150px;
+}
+
+#setupPanel button {
+margin-top: 1.5rem;
+align-self: center;
+}
+
+.toggle-switch {
+display: flex;
+align-items: center;
+gap: 0.5rem;
+font-size: 0.9rem;
+}
+
+.switch {
+position: relative;
+display: inline-block;
+width: 50px;
+height: 24px;
+}
+
+.switch input {
+opacity: 0;
+width: 0;
+height: 0;
+}
+
+.slider {
+position: absolute;
+cursor: pointer;
+background-color: #ccc;
+border-radius: 24px;
+top: 0;
+left: 0;
+right: 0;
+bottom: 0;
+transition: 0.4s;
+}
+
+.slider:before {
+position: absolute;
+content: "";
+height: 18px;
+width: 18px;
+left: 3px;
+bottom: 3px;
+background-color: white;
+border-radius: 50%;
+transition: 0.4s;
+}
+
+.switch input:checked + .slider {
+background-color: #a8996E;
+}
+
+.switch input:checked + .slider\:before {
+transform: translateX(26px);
+}
+
+#overlay.hidden {
+opacity: 0;
+pointer-events: none;
+}
+
+```
+input[type=number], input[type=time], input[type=text] {
+  padding: 6px 12px;
+  background: rgb(31, 32, 35);
+  border: 1px solid rgb(60, 63, 68);
+  border-radius: 4px;
+  font-size: 13px;
+  color: rgb(247, 248, 248);
+  height: 46px;
+  appearance: none;
+  transition: border 0.15s ease 0s;
+}
+
+input[type=number]:focus,
+input[type=time]:focus,
+input[type=text]:focus {
+  outline: none;
+  box-shadow: none;
+  border-color: rgb(100, 153, 255);
+}
+
+/* ✅ NEW: Change border to green if filled (text or number only) */
+input[type="text"]:not(:placeholder-shown),
+input[type="number"]:not(:placeholder-shown) {
+  border-color: #4CAF50;
+}
+
+/* ✅ NEW: For time inputs – apply green border via JS-added class */
+input[type="time"].filled {
+  border-color: #4CAF50 !important;
+}
+```
+
+button {
+padding: 6px 12px;
+background: rgb(31, 32, 35);
+border: 1px solid rgb(60, 63, 68);
+border-radius: 4px;
+font-size: 13px;
+color: rgb(247, 248, 248);
+height: 46px;
+appearance: none;
+transition: border 0.15s ease, background 0.15s ease;
+cursor: pointer;
+}
+
+button:hover {
+background: rgb(41, 42, 45);
+border-color: rgb(100, 153, 255);
+}
+
+button:focus {
+outline: none;
+box-shadow: none;
+border-color: rgb(100, 153, 255);
+}
+
+```
+.hidden {
+  display: none;
+}
+```
+
+.setup-grid {
+display: flex;
+flex-wrap: wrap;
+justify-content: space-between;
+gap: 2rem;
+margin-bottom: 1.5rem;
+}
+
+.left-group,
+.right-group {
+flex: 1;
+min-width: 220px;
+}
+
+.form-group {
+margin-bottom: 1rem;
+text-align: left;
+}
+
+.interval-inputs {
+display: flex;
+align-items: center;
+gap: 0.5rem;
+}
+
+.centered-toggle {
+text-align: center;
+}
+
+  </style>
+</head>
+<body>
+  <h1 id="title">Parents' Meeting Timer v1.5</h1>
+
+  <div class="label">Current Time</div>
+  <div id="clock">--:--:--</div>
+
+  <div class="label">Time Remaining</div>
+  <div id="timerDisplay">00:00</div>
+
+  <div id="progressBarContainer">
+    <div id="progressBar"></div>
+  </div>
+
+<div id="overlay">
+  <div id="setupPanel">
+    <h2>Set Timer</h2>
+    <div class="setup-grid">
+      ...
+    </div>
+    <div class="form-group centered-toggle">...</div>
+    <div class="form-group" id="manualStartGroup" style="display: none;">
+      <button onclick="manualStart()">Start Timer</button>
+    </div>
+  </div>
+</div>
+
+  <div class="right-group">
+    <div class="form-group">
+      <label for="startTime">Start Time:</label>
+      <input type="time" id="startTime" value="16:00">
+    </div>
+    <div class="form-group">
+      <label for="endTime">End Time:</label>
+      <input type="time" id="endTime" value="19:00">
+    </div>
+  </div>
+</div>
+
+<div class="form-group centered-toggle">
+  <label for="startMode">Start Mode:</label>
+  <div class="toggle-switch">
+    <span>Auto</span>
+    <label class="switch">
+      <input type="checkbox" id="startModeToggle">
+      <span class="slider"></span>
+    </label>
+    <span>Manual</span>
+  </div>
+</div>
+
+<div class="form-group" id="manualStartGroup" style="display: none;">
+  <button onclick="manualStart()">Start Timer</button>
+</div>
+</div>
+</div>
+
+<audio id="alarmSound" src="Timer-Ding.wav" preload="auto"></audio>
+
+  <div id="message">Please make your way to your next appointment</div>
+
+  <script>
+    let intervalDuration = 0;
+    let intervalStartTime = null;
+    let timerActive = false;
+    let hasStarted = false;
+    let wakeLock = null;
+
+    async function requestWakeLock() {
+      try {
+        wakeLock = await navigator.wakeLock.request('screen');
+      } catch (err) {
+        console.error(`Wake Lock failed: ${err.name}, ${err.message}`);
+      }
+    }
+
+    function releaseWakeLock() {
+      if (wakeLock !== null) {
+        wakeLock.release()
+          .then(() => {
+            wakeLock = null;
+          });
+      }
+    }
+
+    function updateClock() {
+      const now = new Date();
+      document.getElementById('clock').textContent = now.toLocaleTimeString();
+
+if (!hasStarted) {
+  const startInput = document.getElementById('startTime').value;
+  const [startHour, startMinute] = startInput.split(":" ).map(Number);
+  const isManual = document.getElementById('startModeToggle').checked;
+  if (!isManual && now.getHours() === startHour && now.getMinutes() === startMinute && now.getSeconds() === 0) {
+    autoStart();
+  }
+}
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+
+    function autoStart() {
+      if (hasStarted) return;
+      hasStarted = true;
+      startInterval();
+    }
+
+    function manualStart() {
+      if (hasStarted) return;
+      hasStarted = true;
+      startInterval();
+    }
+
+    function getEndTime() {
+      const [endHour, endMinute] = document.getElementById('endTime').value.split(":").map(Number);
+      const now = new Date();
+      const endTime = new Date(now);
+      endTime.setHours(endHour, endMinute, 0, 0);
+      return endTime;
+    }
+
+
+    function startInterval() {
+      const mins = parseInt(document.getElementById('minutes').value) || 0;
+      const secs = parseInt(document.getElementById('seconds').value) || 0;
+      intervalDuration = (mins * 60 + secs) * 1000;
+
+      if (intervalDuration <= 0) return;
+
+      const title = document.getElementById('timerName').value.trim();
+      if (title) {
+        document.getElementById('title').textContent = title;
+      }
+
+      document.getElementById('overlay').classList.add('hidden');
+      timerActive = true;
+      intervalStartTime = Date.now();
+      document.getElementById('timerDisplay').style.fontSize = '15rem';
+      runDriftFreeTimer();
+      requestFullscreen();
+      requestWakeLock();
+    }
+
+    function runDriftFreeTimer() {
+  function update() {
+    if (!timerActive) return;
+
+    const now = new Date();
+    const endTime = getEndTime();
+
+    if (now >= endTime) {
+      timerActive = false;
+      hasStarted = false;
+      exitFullscreen();
+      location.reload();
+      return;
+    }
+
+    const current = Date.now();
+    let elapsed = current - intervalStartTime;
+
+    if (elapsed >= intervalDuration) {
+      document.getElementById('alarmSound').play();
+      intervalStartTime += intervalDuration;
+      elapsed = 0;
+      showMessage();
+    }
+
+    const remaining = Math.max(0, intervalDuration - elapsed);
+    displayRemainingTime(remaining);
+    updateProgressBar(remaining);
+    requestAnimationFrame(update);
+  }
+
+  update();
+}
+
+
+    function displayRemainingTime(ms) {
+      const totalSeconds = Math.floor(ms / 1000);
+      const mins = String(Math.floor(totalSeconds / 60)).padStart(2, '0');
+      const secs = String(totalSeconds % 60).padStart(2, '0');
+      document.getElementById('timerDisplay').textContent = `${mins}:${secs}`;
+    }
+
+    function updateProgressBar(remainingMs) {
+      const percent = (remainingMs / intervalDuration) * 100;
+      document.getElementById('progressBar').style.width = `${percent}%`;
+    }
+
+    function showMessage() {
+      const messageElement = document.getElementById('message');
+      messageElement.style.display = 'block';
+      setTimeout(() => {
+        messageElement.style.display = 'none';
+      }, 10000);
+    }
+
+    function requestFullscreen() {
+      const el = document.documentElement;
+      if (el.requestFullscreen) {
+        el.requestFullscreen();
+      } else if (el.webkitRequestFullscreen) {
+        el.webkitRequestFullscreen();
+      } else if (el.msRequestFullscreen) {
+        el.msRequestFullscreen();
+      }
+    }
+
+    function exitFullscreen() {
+      if (document.exitFullscreen) {
+        document.exitFullscreen();
+      } else if (document.webkitExitFullscreen) {
+        document.webkitExitFullscreen();
+      } else if (document.msExitFullscreen) {
+        document.msExitFullscreen();
+      }
+    }
+
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') {
+        timerActive = false;
+        hasStarted = false;
+        exitFullscreen();
+        releaseWakeLock();
+        location.reload();
+      }
+    }); // <-- ✅ This closing brace and parenthesis were missing
+
+    // ✅ Add green border to filled time inputs
+    document.querySelectorAll('input[type="time"]').forEach(input => {
+      input.addEventListener('change', () => {
+        if (input.value) {
+          input.classList.add('filled');
+        } else {
+          input.classList.remove('filled');
+        }
+      });
+    });
+document.getElementById('startModeToggle').addEventListener('change', function() {
+  const isManual = this.checked;
+  document.getElementById('manualStartGroup').style.display = isManual ? 'block' : 'none';
+});
+  </script>
+
+</body>
+</html>

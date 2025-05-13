@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Parents Evening Timer</title>
+  <!-- Add Google Font link -->
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: "Poppins", sans-serif; /* Apply the custom font */
+  text-align: center;
+  padding: 2rem;
+  /* Add gradient background that scales with the page */
+  background: linear-gradient(135deg, #000000, #041E42); /* Placeholder gradient, replace with your colors */
+  background-size: cover;  /* Ensure the gradient covers the entire background */
+  background-attachment: fixed; /* Keeps the gradient fixed during scroll */
+  color: #fff;
+}
+
+h1 {
+  font-size: 3rem;
+  margin-bottom: 2rem;
+}
+
+.label {
+  font-size: 2.5rem;
+  margin-top: 1rem;
+}
+
+#clock {
+  font-size: 6rem; /* Increased size */
+  margin-bottom: 2rem;
+}
+
+#timerDisplay {
+  font-size: 12rem; /* Increased size */
+  font-weight: bold;
+  color: #A8996E;
+  margin: 1rem 0;
+}
+
+#progressBarContainer {
+  width: 80%;
+  height: 30px;
+  background: #444;
+  margin: 1rem auto;
+  border-radius: 15px;
+  overflow: hidden;
+}
+
+#progressBar {
+  height: 100%;
+  background: #A8996E;
+  width: 100%;
+  transition: width 0.25s linear;
+}
+
+#message {
+  font-size: 2rem;
+  color: red;
+  font-weight: bold;
+  margin-top: 4rem; /* Increased margin-top to give more space between message and progress bar */
+  padding: 1rem; /* Added padding */
+  display: none;
+}
+
+.setup {
+  margin-top: 2rem;
+}
+
+input[type=number], input[type=time] {
+  font-size: 1.5rem;
+  margin: 0.3rem;
+}
+
+button {
+  font-size: 1.2rem;
+  margin: 0.5rem;
+  padding: 0.6rem 1.2rem;
+  cursor: pointer;
+}
+
+.hidden {
+  display: none;
+    }
+
+    .hidden {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <h1>Parents' Evening Timer</h1>
+
+  <div class="label">Current Time</div>
+  <div id="clock">--:--:--</div>
+
+  <div class="label">Appointment Time Remaining</div>
+  <div id="timerDisplay">00:00</div>
+
+  <div id="progressBarContainer">
+    <div id="progressBar"></div>
+  </div>
+
+  <div id="setupPanel" class="setup">
+    <h2>Set Timer</h2>
+    <div>
+      Interval: 
+      <input type="number" id="minutes" placeholder="MM" min="0" max="59"> :
+      <input type="number" id="seconds" placeholder="SS" min="0" max="59">
+    </div>
+    <div>
+      Start Time: 
+      <input type="time" id="startTime" value="16:00">
+    </div>
+    <div>
+      <button onclick="manualStart()">Manual Start (Test)</button>
+    </div>
+  </div>
+
+  <audio id="alarmSound" src="Timer-Ding.wav" preload="auto"></audio>
+
+  <div id="message">Please make your way to your next appointment</div>
+
+  <script>
+    let intervalDuration = 0;
+    let intervalStartTime = null;
+    let timerActive = false;
+    let hasStarted = false;
+
+    // Update the current time every second
+    function updateClock() {
+      const now = new Date();
+      document.getElementById('clock').textContent = now.toLocaleTimeString();
+
+      if (!hasStarted) {
+        const startInput = document.getElementById('startTime').value;
+        const [startHour, startMinute] = startInput.split(":").map(Number);
+        if (now.getHours() === startHour && now.getMinutes() === startMinute && now.getSeconds() === 0) {
+          autoStart();
+        }
+      }
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+
+    // Auto-start the timer at the set time
+    function autoStart() {
+      if (hasStarted) return;
+      hasStarted = true;
+      startInterval();
+    }
+
+    // Start the timer manually for testing
+    function manualStart() {
+      if (hasStarted) return;
+      hasStarted = true;
+      startInterval();
+    }
+
+    // Initialize the interval timer
+    function startInterval() {
+      const mins = parseInt(document.getElementById('minutes').value) || 0;
+      const secs = parseInt(document.getElementById('seconds').value) || 0;
+      intervalDuration = (mins * 60 + secs) * 1000;
+
+      if (intervalDuration <= 0) return;
+
+      document.getElementById('setupPanel').classList.add('hidden');
+      timerActive = true;
+      intervalStartTime = Date.now();
+      runDriftFreeTimer();
+    }
+
+    // Run the timer and update the progress bar
+    function runDriftFreeTimer() {
+      function update() {
+        if (!timerActive) return;
+
+        const now = Date.now();
+        let elapsed = now - intervalStartTime;
+        if (elapsed >= intervalDuration) {
+          document.getElementById('alarmSound').play();
+          intervalStartTime += intervalDuration; // keep it synced
+          elapsed = 0;
+          showMessage();
+        }
+
+        const remaining = Math.max(0, intervalDuration - elapsed);
+        displayRemainingTime(remaining);
+        updateProgressBar(remaining);
+        requestAnimationFrame(update);
+      }
+      update();
+    }
+
+    // Display the remaining time
+    function displayRemainingTime(ms) {
+      const totalSeconds = Math.floor(ms / 1000);
+      const mins = String(Math.floor(totalSeconds / 60)).padStart(2, '0');
+      const secs = String(totalSeconds % 60).padStart(2, '0');
+      document.getElementById('timerDisplay').textContent = `${mins}:${secs}`;
+    }
+
+    // Update the progress bar width
+    function updateProgressBar(remainingMs) {
+      const percent = (remainingMs / intervalDuration) * 100;
+      document.getElementById('progressBar').style.width = `${percent}%`;
+    }
+
+    // Show the message when timer runs out
+    function showMessage() {
+      const messageElement = document.getElementById('message');
+      messageElement.style.display = 'block'; // Show the message
+      setTimeout(() => {
+        messageElement.style.display = 'none'; // Hide after 10 seconds
+      }, 10000);
+    }
+  </script>
+</body>
+</html>

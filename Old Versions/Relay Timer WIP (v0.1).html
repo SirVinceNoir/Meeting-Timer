@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>HTML Timer & Clock</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      padding: 2rem;
+      background: #f0f0f0;
+    }
+    #clock, #timerDisplay {
+      font-size: 2rem;
+      margin: 1rem;
+    }
+    input[type=number] {
+      width: 4rem;
+      font-size: 1.2rem;
+      margin: 0.2rem;
+    }
+    button {
+      font-size: 1rem;
+      margin: 0.5rem;
+      padding: 0.5rem 1rem;
+    }
+  </style>
+</head>
+<body>
+  <h1>Appointment Timer</h1>
+
+  <div id="clock">--:--:--</div>
+
+  <h2>Set Timer</h2>
+  <div>
+    <input type="number" id="hours" placeholder="HH" min="0" max="23">
+    <input type="number" id="minutes" placeholder="MM" min="0" max="59">
+    <input type="number" id="seconds" placeholder="SS" min="0" max="59">
+  </div>
+
+  <div>
+    <button onclick="startTimer()">Start Timer</button>
+    <button onclick="stopTimer()">Stop Timer</button>
+  </div>
+
+  <div id="timerDisplay">00:00:00</div>
+
+  <!-- Add your custom sound -->
+  <audio id="alarmSound" src="https://www.soundjay.com/buttons/sounds/beep-07.mp3" preload="auto"></audio>
+
+  <script>
+    // Live clock
+    function updateClock() {
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString();
+      document.getElementById('clock').textContent = timeStr;
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+
+    // Timer logic
+    let timerInterval;
+    let remainingSeconds = 0;
+
+    function startTimer() {
+      const hrs = parseInt(document.getElementById('hours').value) || 0;
+      const mins = parseInt(document.getElementById('minutes').value) || 0;
+      const secs = parseInt(document.getElementById('seconds').value) || 0;
+      remainingSeconds = hrs * 3600 + mins * 60 + secs;
+
+      updateTimerDisplay();
+      clearInterval(timerInterval);
+      timerInterval = setInterval(() => {
+        if (remainingSeconds > 0) {
+          remainingSeconds--;
+          updateTimerDisplay();
+        } else {
+          clearInterval(timerInterval);
+          document.getElementById('alarmSound').play();
+        }
+      }, 1000);
+    }
+
+    function stopTimer() {
+      clearInterval(timerInterval);
+    }
+
+    function updateTimerDisplay() {
+      const hrs = String(Math.floor(remainingSeconds / 3600)).padStart(2, '0');
+      const mins = String(Math.floor((remainingSeconds % 3600) / 60)).padStart(2, '0');
+      const secs = String(remainingSeconds % 60).padStart(2, '0');
+      document.getElementById('timerDisplay').textContent = `${hrs}:${mins}:${secs}`;
+    }
+  </script>
+</body>
+</html>
