@@ -3,12 +3,34 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Parents Evening Timer</title>
-  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+  <title>Meeting Timer</title>
   <style>
-    * {
-      box-sizing: border-box;
+    /* Poppins is bundled locally so the app works with no network connection. */
+    @font-face {
+      font-family: 'Poppins';
+      font-style: normal;
+      font-weight: 400;
+      font-display: swap;
+      src: url('fonts/poppins-400.woff2') format('woff2');
     }
+    @font-face {
+      font-family: 'Poppins';
+      font-style: normal;
+      font-weight: 600;
+      font-display: swap;
+      src: url('fonts/poppins-600.woff2') format('woff2');
+    }
+
+    :root {
+      --gold: #A8996E;
+      --gold-glow: rgba(184, 163, 97, 0.5);
+      --navy: #041e42;
+      --field-bg: rgb(31, 32, 35);
+      --field-border: rgb(60, 63, 68);
+      --text: rgb(247, 248, 248);
+    }
+
+    * { box-sizing: border-box; }
 
     html, body {
       margin: 0;
@@ -18,10 +40,10 @@
     }
 
     body {
-      font-family: "Poppins", sans-serif;
+      font-family: "Poppins", "Segoe UI", system-ui, sans-serif;
       text-align: center;
       padding: 2rem;
-      background: linear-gradient(-45deg, #041e42, #000000);
+      background: linear-gradient(-45deg, var(--navy), #000000);
       background-size: 200% 200%;
       animation: gradient 15s ease infinite;
       color: #fff;
@@ -29,393 +51,1088 @@
       flex-direction: column;
       justify-content: center;
       align-items: center;
-      height: 100vh;
       position: relative;
     }
 
     body::before {
       content: "";
       position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
+      inset: 0;
       background: url('Logo.png') center center no-repeat;
       background-size: contain;
       opacity: 0.05;
       z-index: 0;
+      pointer-events: none;
     }
 
     @keyframes gradient {
-      0% {
-        background-position: 0% 50%;
-      }
-      50% {
-        background-position: 100% 50%;
-      }
-      100% {
-        background-position: 0% 50%;
-      }
+      0%   { background-position: 0% 50%; }
+      50%  { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
     }
 
-    h1, .label, #clock, #timerDisplay, #progressBarContainer, #setupPanel, #message {
+    @media (prefers-reduced-motion: reduce) {
+      body { animation: none; }
+      #progressBar { transition: none !important; }
+    }
+
+    #stage {
       position: relative;
       z-index: 1;
+      width: 100%;
+      max-width: 1600px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
     }
 
     h1 {
-      font-size: 3rem;
-      margin-bottom: 2rem;
+      font-size: clamp(1.25rem, 4vw, 3rem);
+      margin: 0 0 clamp(0.75rem, 3vh, 2rem) 0;
+      font-weight: 600;
     }
 
     .label {
-      font-size: 3rem;
-      margin-top: 1rem;
+      font-size: clamp(0.9rem, 2.4vw, 3rem);
+      margin-top: clamp(0.25rem, 1.5vh, 1rem);
     }
 
     #clock {
-      font-size: 6rem;
-      margin-bottom: 2rem;
+      font-size: clamp(1.75rem, 6vw, 6rem);
+      margin-bottom: clamp(0.75rem, 3vh, 2rem);
+      font-variant-numeric: tabular-nums;
     }
 
     #timerDisplay {
-      font-size: 8rem;
+      font-size: clamp(2.5rem, min(14vw, 20vh), 8rem);
       font-weight: bold;
-      color: #A8996E;
+      color: var(--gold);
       text-shadow: #5e553e 0px 0 15px;
       transition: font-size 0.5s ease;
-      /*outline: 1px solid lime; /* Helps visualize actual space */
+      font-variant-numeric: tabular-nums;
+      line-height: 1.1;
     }
 
-#progressBarContainer {
-  width: 80%;
-  height: 30px;
-  background: rgba(68, 68, 68, 0.5); /* 50% transparent gray */
-  margin: 3rem auto 1rem auto;
-  border-radius: 15px;
-  overflow: hidden;
-}
+    /* Enlarged display once the session is under way. */
+    body.running #timerDisplay,
+    body.paused #timerDisplay {
+      font-size: clamp(3rem, min(22vw, 30vh), 15rem);
+    }
 
+    body.paused #timerDisplay { opacity: 0.55; }
+
+    #progressBarContainer {
+      width: 80%;
+      height: 30px;
+      background: rgba(68, 68, 68, 0.5);
+      margin: clamp(1rem, 4vh, 3rem) auto 1rem auto;
+      border-radius: 15px;
+      overflow: hidden;
+    }
 
     #progressBar {
       height: 100%;
-      background: #A8996E;
-      width: 100%;
-      box-shadow: 0 0 20px rgba(184, 163, 97,0.5);
-      transition: width 0.25s linear;
+      background: var(--gold);
+      /* Empty until a session starts, so the idle screen does not show a full
+         bar behind the setup panel. */
+      width: 0;
+      box-shadow: 0 0 20px var(--gold-glow);
+      transition: width 0.2s linear;
     }
 
-    #message {
-      font-size: 2rem;
-      color: red;
-      font-weight: bold;
-      margin-top: 2rem;
-      display: none;
+    /* Used for the instant jump back to 100% at the start of an interval,
+       so the bar does not animate backwards. */
+    #progressBar.no-transition { transition: none; }
+
+    #sessionInfo {
+      font-size: clamp(0.75rem, 1.4vw, 1rem);
+      color: #9fb0c4;
+      margin-top: 0.25rem;
+      min-height: 1.4em;
     }
+
+    /* visibility rather than display, so showing the message never shifts
+       the layout underneath it. */
+    #message {
+      font-size: clamp(1rem, 2.6vw, 2rem);
+      color: #ff4d4d;
+      font-weight: bold;
+      margin-top: clamp(0.5rem, 2vh, 2rem);
+      visibility: hidden;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      min-height: 1.3em;
+    }
+
+    #message.show { visibility: visible; opacity: 1; }
+
+    /* ---------- control bar ---------- */
+
+    #controls {
+      position: fixed;
+      left: 50%;
+      transform: translateX(-50%);
+      bottom: 1.5rem;
+      z-index: 5;
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      justify-content: center;
+      padding: 0.75rem 1rem;
+      border-radius: 999px;
+      background: rgba(0, 0, 0, 0.45);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(168, 153, 110, 0.35);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+    }
+
+    /* Visible on mouse movement, and pinned whenever the timer is paused so
+       the operator can always find Resume. */
+    body.controls-visible #controls,
+    body.paused #controls {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    /* Nothing to control before a session starts or after it ends. */
+    body.idle #controls,
+    body.finished #controls { display: none; }
+
+    #controls button { min-width: 7rem; }
+
+    /* ---------- setup overlay ---------- */
 
     #overlay {
       position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
+      inset: 0;
       background: rgba(0, 0, 0, 0.3);
       display: flex;
       align-items: center;
       justify-content: center;
       z-index: 10;
       transition: opacity 0.5s ease;
+      padding: 1rem;
+      overflow-y: auto;
     }
-
-#setupPanel {
-  background: rgba(255, 255, 255, 0.1); /* light glassy tint */
-  backdrop-filter: blur(20px);          /* background blur */
-  -webkit-backdrop-filter: blur(20px);  /* for Safari */
-  color: #ffffff;
-  padding: 2rem;
-  border-radius: 1rem;
-  box-shadow: 0 0 20px rgba(184, 163, 97,0.5);
-  max-width: 500px;
-  width: 90%;
-  text-align: center;
-  border: 2px solid #a8996E; /* Adding a 2px border with the specified color */
-}
-
 
     #overlay.hidden {
       opacity: 0;
       pointer-events: none;
     }
 
+    #setupPanel {
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      color: #ffffff;
+      padding: 2rem;
+      border-radius: 1rem;
+      box-shadow: 0 0 20px var(--gold-glow);
+      max-width: 520px;
+      width: 100%;
+      max-height: 100%;
+      overflow-y: auto;
+      text-align: center;
+      border: 2px solid var(--gold);
+    }
+
+    #setupPanel h2 { margin-top: 0; }
+
+    .field { margin: 0.75rem 0; }
+    .field > span { display: inline-block; margin-bottom: 0.25rem; }
+
     input[type=number], input[type=time], input[type=text] {
       padding: 6px 12px;
-      margin: 1rem 0;
-      background: rgb(31, 32, 35);
-      border: 1px solid rgb(60, 63, 68);
+      margin: 0.35rem 0;
+      background: var(--field-bg);
+      border: 1px solid var(--field-border);
       border-radius: 4px;
       font-size: 13px;
-      color: rgb(247, 248, 248);
+      font-family: inherit;
+      color: var(--text);
       height: 46px;
       appearance: none;
       transition: border 0.15s ease 0s;
     }
 
-    input[type=number]:focus, input[type=time]:focus, input[type=text]:focus {
+    input[type=number] { width: 5.5rem; text-align: center; }
+    input[type=text]   { width: 100%; }
+
+    input:focus-visible {
       outline: none;
       box-shadow: none;
       border-color: rgb(100, 153, 255);
     }
 
-button {
-  padding: 6px 12px;
-  background: rgb(31, 32, 35);
-  border: 1px solid rgb(60, 63, 68);
-  border-radius: 4px;
-  font-size: 13px;
-  font-weight: Bold;
-  color: rgb(247, 248, 248);
-  height: 46px;
-  appearance: none;
-  transition: border 0.15s ease, background 0.15s ease;
-  cursor: pointer;
-}
+    input.invalid { border-color: #ff4d4d; }
 
-button:hover {
-  background: rgb(47, 82, 51);
-  border-color: rgb(0, 161, 27);
-}
+    button {
+      padding: 6px 12px;
+      background: var(--field-bg);
+      border: 1px solid var(--field-border);
+      border-radius: 4px;
+      font-size: 13px;
+      font-weight: bold;
+      font-family: inherit;
+      color: var(--text);
+      height: 46px;
+      appearance: none;
+      transition: border 0.15s ease, background 0.15s ease;
+      cursor: pointer;
+    }
 
-button:focus {
-  outline: none;
-  box-shadow: none;
-  border-color: rgb(0, 161, 27);
-}
+    button:hover:not(:disabled) {
+      background: rgb(47, 82, 51);
+      border-color: rgb(0, 161, 27);
+    }
 
+    button:focus-visible {
+      outline: none;
+      box-shadow: none;
+      border-color: rgb(0, 161, 27);
+    }
 
-    .hidden {
-      display: none;
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .hint {
+      margin: 1rem 0;
+      font-size: 0.85rem;
+      color: #ccc;
+      line-height: 1.6;
+    }
+
+    #autoStartNotice {
+      margin: 0.75rem 0;
+      font-size: 0.9rem;
+      color: var(--gold);
+      min-height: 1.4em;
+      font-weight: 600;
+    }
+
+    #setupError {
+      margin: 0.75rem 0 0 0;
+      color: #ff6b6b;
+      font-size: 0.9rem;
+      min-height: 1.3em;
+    }
+
+    #audioNotice {
+      margin: 0.5rem 0 0 0;
+      font-size: 0.8rem;
+      color: #ffc46b;
+      min-height: 1.2em;
+    }
+
+    kbd {
+      background: rgba(255, 255, 255, 0.12);
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      border-radius: 3px;
+      padding: 0 4px;
+      font-size: 0.85em;
+      font-family: inherit;
     }
   </style>
 </head>
-<body>
-  <h1 id="title">Parents' Meeting Timer v1.9.2</h1>
+<body class="idle">
 
-  <div class="label">Current Time</div>
-  <div id="clock">--:--:--</div>
+  <div id="stage">
+    <h1 id="title">Parents' Meeting Timer</h1>
 
-  <div class="label">Time Remaining</div>
-  <div id="timerDisplay">00:00</div>
+    <div class="label">Current Time</div>
+    <div id="clock">--:--:--</div>
 
-  <div id="progressBarContainer">
-    <div id="progressBar"></div>
+    <div class="label" id="remainingLabel">Time Remaining</div>
+    <div id="timerDisplay">00:00</div>
+
+    <div id="progressBarContainer">
+      <div id="progressBar"></div>
+    </div>
+
+    <div id="sessionInfo"></div>
+
+    <div id="message">Please make your way to your next appointment</div>
+  </div>
+
+  <div id="controls">
+    <button id="btnPause"    type="button">Pause</button>
+    <button id="btnNext"     type="button">Next &#9193;</button>
+    <button id="btnAddMin"   type="button">+1 min</button>
+    <button id="btnSettings" type="button">Settings</button>
   </div>
 
   <div id="overlay">
-    <div id="setupPanel" class="setup">
-      <h2>Configure Timer:</h2>
-      <div>
-        Timer Name:
-        <input type="text" id="timerName" placeholder="Enter title">
+    <div id="setupPanel">
+      <h2>Configure Timer</h2>
+
+      <div class="field">
+        <span>Timer name</span><br>
+        <input type="text" id="timerName" placeholder="Parents' Meeting Timer" autocomplete="off">
+      </div>
+
+      <div class="field">
+        <span>Interval per appointment</span><br>
+        <input type="number" id="minutes" placeholder="MM" min="0" max="180" step="1" inputmode="numeric"> :
+        <input type="number" id="seconds" placeholder="SS" min="0" max="59" step="1" inputmode="numeric">
+      </div>
+
+      <div class="field">
+        <span>Session times</span><br>
+        <label>Start <input type="time" id="startTime" value="16:00"></label>
+        <label>End <input type="time" id="endTime" value="19:00"></label>
+      </div>
+
+      <div id="autoStartNotice"></div>
+
+      <div class="hint">
+        The timer starts automatically at the start time, or press Manual Start to begin now.<br>
+        <kbd>Space</kbd> pause &middot; <kbd>N</kbd> next &middot; <kbd>F</kbd> fullscreen &middot; <kbd>Esc</kbd> back to settings
       </div>
 
       <div>
-        Interval:
-        <input type="number" id="minutes" placeholder="MM" min="0" max="59"> :
-        <input type="number" id="seconds" placeholder="SS" min="0" max="59">
+        <button id="btnManualStart" type="button">MANUAL START &#9654;&#65039;</button>
       </div>
-      
-      <div>
-        Start Time:
-        <input type="time" id="startTime" value="16:00">
-        End Time:
-        <input type="time" id="endTime" value="19:00">
-      </div>
-      <div style="margin: 1rem 0; font-size: 0.9rem; color: #ccc;">
-  Timer will start automatically at the specified start time, or click below to start immediately.
-  <br>Tip: You can double-click the background to go fullscreen.
-</div>
-      <div>
-        <button onclick="manualStart()">MANUAL START ▶️</button>
-      </div>
+
+      <div id="setupError" role="alert"></div>
+      <div id="audioNotice"></div>
     </div>
   </div>
 
   <audio id="alarmSound" src="Timer-Ding.wav" preload="auto"></audio>
 
-  <div id="message">Please make your way to your next appointment</div>
-
   <script>
-    let intervalDuration = 0;
-    let intervalStartTime = null;
-    let timerActive = false;
-    let hasStarted = false;
-    let wakeLock = null;
+  (function () {
+    'use strict';
 
-    async function requestWakeLock() {
+    // ---------------------------------------------------------------------
+    // Constants and element handles
+    // ---------------------------------------------------------------------
+
+    var TICK_MS = 200;
+    var DAY_MS = 86400000;
+    var SETTINGS_KEY = 'meetingTimer.settings.v2';
+    var DEFAULT_TITLE = "Parents' Meeting Timer";
+
+    var el = {
+      title:           document.getElementById('title'),
+      clock:           document.getElementById('clock'),
+      remainingLabel:  document.getElementById('remainingLabel'),
+      timerDisplay:    document.getElementById('timerDisplay'),
+      progressBar:     document.getElementById('progressBar'),
+      sessionInfo:     document.getElementById('sessionInfo'),
+      message:         document.getElementById('message'),
+      overlay:         document.getElementById('overlay'),
+      setupPanel:      document.getElementById('setupPanel'),
+      timerName:       document.getElementById('timerName'),
+      minutes:         document.getElementById('minutes'),
+      seconds:         document.getElementById('seconds'),
+      startTime:       document.getElementById('startTime'),
+      endTime:         document.getElementById('endTime'),
+      autoStartNotice: document.getElementById('autoStartNotice'),
+      setupError:      document.getElementById('setupError'),
+      audioNotice:     document.getElementById('audioNotice'),
+      alarm:           document.getElementById('alarmSound'),
+      btnManualStart:  document.getElementById('btnManualStart'),
+      btnPause:        document.getElementById('btnPause'),
+      btnNext:         document.getElementById('btnNext'),
+      btnAddMin:       document.getElementById('btnAddMin'),
+      btnSettings:     document.getElementById('btnSettings')
+    };
+
+    var body = document.body;
+
+    // Bridge to the Electron shell. Absent when the page is opened directly
+    // in a browser, in which case the equivalent web APIs are used.
+    var host = window.timerHost || null;
+
+    // ---------------------------------------------------------------------
+    // State
+    // ---------------------------------------------------------------------
+
+    var state = 'idle';          // idle | running | paused | finished
+    var intervalMs = 0;          // length of one appointment
+    var anchorMs = 0;            // wall-clock start of the current interval
+    var sessionStartMs = 0;
+    var sessionEndMs = 0;        // wall-clock end of the whole session
+    var pauseStartedMs = 0;
+    var autoStartArmed = false;
+    var audioUnlocked = false;
+    var wakeLock = null;
+    var messageTimer = null;
+    var controlsTimer = null;
+    var lastProgressPercent = 100;
+
+    // ---------------------------------------------------------------------
+    // Settings persistence
+    //
+    // Previously every stop reloaded the page, which discarded the whole
+    // configuration. Settings are now saved on each change and restored on
+    // load, and stopping the timer never reloads.
+    // ---------------------------------------------------------------------
+
+    function saveSettings() {
       try {
-        wakeLock = await navigator.wakeLock.request('screen');
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+          name: el.timerName.value,
+          minutes: el.minutes.value,
+          seconds: el.seconds.value,
+          startTime: el.startTime.value,
+          endTime: el.endTime.value
+        }));
       } catch (err) {
-        console.error(`Wake Lock failed: ${err.name}, ${err.message}`);
+        // Storage can be unavailable (private mode, restricted profile). The
+        // app still works, it just will not remember settings.
+        console.warn('Could not save settings:', err);
       }
+    }
+
+    function loadSettings() {
+      var raw;
+      try {
+        raw = localStorage.getItem(SETTINGS_KEY);
+      } catch (err) {
+        console.warn('Could not read settings:', err);
+        return;
+      }
+      if (!raw) return;
+      try {
+        var s = JSON.parse(raw);
+        if (typeof s.name === 'string') el.timerName.value = s.name;
+        if (typeof s.minutes === 'string') el.minutes.value = s.minutes;
+        if (typeof s.seconds === 'string') el.seconds.value = s.seconds;
+        if (s.startTime) el.startTime.value = s.startTime;
+        if (s.endTime) el.endTime.value = s.endTime;
+      } catch (err) {
+        console.warn('Stored settings were unreadable:', err);
+      }
+    }
+
+    // ---------------------------------------------------------------------
+    // Time helpers
+    // ---------------------------------------------------------------------
+
+    function pad2(n) { return String(n).padStart(2, '0'); }
+
+    function parseClockField(value) {
+      if (!value) return null;
+      var parts = String(value).split(':');
+      if (parts.length < 2) return null;
+      var h = Number(parts[0]);
+      var m = Number(parts[1]);
+      if (!isFinite(h) || !isFinite(m)) return null;
+      if (h < 0 || h > 23 || m < 0 || m > 59) return null;
+      return { hours: h, minutes: m };
+    }
+
+    function timestampToday(clock, reference) {
+      var d = new Date(reference);
+      d.setHours(clock.hours, clock.minutes, 0, 0);
+      return d.getTime();
+    }
+
+    function getIntervalMs() {
+      var mins = parseInt(el.minutes.value, 10);
+      var secs = parseInt(el.seconds.value, 10);
+      if (!isFinite(mins) || mins < 0) mins = 0;
+      if (!isFinite(secs) || secs < 0) secs = 0;
+      return (mins * 60 + secs) * 1000;
+    }
+
+    /**
+     * Resolve the configured start and end times into absolute timestamps for
+     * the session current (or next) relative to `now`.
+     *
+     * If the end time is at or before the start time the session is taken to
+     * run past midnight, so the end rolls over to the following day.
+     */
+    function resolveSession(now) {
+      var startClock = parseClockField(el.startTime.value);
+      var endClock = parseClockField(el.endTime.value);
+      if (!startClock || !endClock) return null;
+
+      var startMs = timestampToday(startClock, now);
+      var endMs = timestampToday(endClock, now);
+      if (endMs <= startMs) endMs += DAY_MS;
+
+      return { startMs: startMs, endMs: endMs };
+    }
+
+    function formatClockValue(value) {
+      var c = parseClockField(value);
+      return c ? pad2(c.hours) + ':' + pad2(c.minutes) : '--:--';
+    }
+
+    function formatDuration(ms) {
+      var total = Math.max(0, Math.round(ms / 1000));
+      var h = Math.floor(total / 3600);
+      var m = Math.floor((total % 3600) / 60);
+      var s = total % 60;
+      return h > 0 ? h + 'h ' + pad2(m) + 'm ' + pad2(s) + 's'
+                   : pad2(m) + 'm ' + pad2(s) + 's';
+    }
+
+    // ---------------------------------------------------------------------
+    // Validation
+    //
+    // The original code returned silently when the interval was zero, which
+    // made Manual Start look broken. Every rejection now says why.
+    // ---------------------------------------------------------------------
+
+    function setError(msg) {
+      el.setupError.textContent = msg || '';
+    }
+
+    function clearInvalid() {
+      el.minutes.classList.remove('invalid');
+      el.seconds.classList.remove('invalid');
+      el.startTime.classList.remove('invalid');
+      el.endTime.classList.remove('invalid');
+    }
+
+    /**
+     * Check the configuration is usable. Returns the resolved session on
+     * success, or null after reporting the problem to the user.
+     */
+    function validate(now) {
+      clearInvalid();
+
+      var ms = getIntervalMs();
+      if (ms <= 0) {
+        el.minutes.classList.add('invalid');
+        el.seconds.classList.add('invalid');
+        setError('Set an interval longer than zero before starting.');
+        return null;
+      }
+
+      var session = resolveSession(now);
+      if (!session) {
+        el.startTime.classList.add('invalid');
+        el.endTime.classList.add('invalid');
+        setError('Enter a valid start and end time.');
+        return null;
+      }
+
+      if (now >= session.endMs) {
+        el.endTime.classList.add('invalid');
+        setError('The end time (' + formatClockValue(el.endTime.value) +
+                 ') has already passed, so the session would finish immediately.');
+        return null;
+      }
+
+      if (ms > session.endMs - session.startMs) {
+        el.minutes.classList.add('invalid');
+        setError('The interval is longer than the whole session.');
+        return null;
+      }
+
+      setError('');
+      return session;
+    }
+
+    // ---------------------------------------------------------------------
+    // Audio
+    //
+    // Browsers block audio until the user has interacted with the page, so an
+    // unattended automatic start would previously ring silently. The element
+    // is unlocked on the first interaction and the operator is warned while
+    // that has not happened.
+    // ---------------------------------------------------------------------
+
+    function markAudioUnlocked() {
+      audioUnlocked = true;
+      updateAudioNotice();
+    }
+
+    function unlockAudio() {
+      if (audioUnlocked) return;
+      var previousVolume = el.alarm.volume;
+      el.alarm.volume = 0;
+      var attempt;
+      try {
+        attempt = el.alarm.play();
+      } catch (err) {
+        el.alarm.volume = previousVolume;
+        return;
+      }
+      if (attempt && typeof attempt.then === 'function') {
+        attempt.then(function () {
+          el.alarm.pause();
+          el.alarm.currentTime = 0;
+          el.alarm.volume = previousVolume;
+          markAudioUnlocked();
+        }).catch(function () {
+          el.alarm.volume = previousVolume;
+        });
+      } else {
+        el.alarm.pause();
+        el.alarm.currentTime = 0;
+        el.alarm.volume = previousVolume;
+        markAudioUnlocked();
+      }
+    }
+
+    function updateAudioNotice() {
+      el.audioNotice.textContent = audioUnlocked
+        ? ''
+        : 'Click anywhere once to enable the alarm sound.';
+    }
+
+    function ring() {
+      try {
+        el.alarm.currentTime = 0;
+        var attempt = el.alarm.play();
+        if (attempt && typeof attempt.catch === 'function') {
+          attempt.catch(function (err) {
+            console.warn('Alarm could not play:', err);
+          });
+        }
+      } catch (err) {
+        console.warn('Alarm could not play:', err);
+      }
+    }
+
+    // ---------------------------------------------------------------------
+    // Screen wake lock
+    //
+    // The browser releases the lock whenever the page is hidden, so it is
+    // re-acquired when the page becomes visible again. Previously it was
+    // requested once and then silently lost.
+    // ---------------------------------------------------------------------
+
+    function requestWakeLock() {
+      if (host && host.setKeepAwake) {
+        host.setKeepAwake(true);
+        return;
+      }
+      if (!('wakeLock' in navigator)) return;
+      navigator.wakeLock.request('screen').then(function (lock) {
+        wakeLock = lock;
+        lock.addEventListener('release', function () { wakeLock = null; });
+      }).catch(function (err) {
+        console.warn('Wake lock unavailable:', err.name, err.message);
+      });
     }
 
     function releaseWakeLock() {
-      if (wakeLock !== null) {
-        wakeLock.release()
-          .then(() => {
-            wakeLock = null;
-          });
+      if (host && host.setKeepAwake) {
+        host.setKeepAwake(false);
+        return;
+      }
+      if (wakeLock) {
+        wakeLock.release().catch(function () { /* already released */ });
+        wakeLock = null;
       }
     }
 
-    function updateClock() {
-      const now = new Date();
-      document.getElementById('clock').textContent = now.toLocaleTimeString();
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible' &&
+          (state === 'running' || state === 'paused')) {
+        requestWakeLock();
+      }
+    });
 
-      if (!hasStarted) {
-        const startInput = document.getElementById('startTime').value;
-        const [startHour, startMinute] = startInput.split(":").map(Number);
-        if (now.getHours() === startHour && now.getMinutes() === startMinute && now.getSeconds() === 0) {
-          autoStart();
+    // ---------------------------------------------------------------------
+    // Fullscreen
+    // ---------------------------------------------------------------------
+
+    function isFullscreen() {
+      if (host && host.isFullscreen) return host.isFullscreen();
+      return !!(document.fullscreenElement || document.webkitFullscreenElement);
+    }
+
+    function enterFullscreen() {
+      if (host && host.setFullscreen) { host.setFullscreen(true); return; }
+      var elem = document.documentElement;
+      var req = elem.requestFullscreen || elem.webkitRequestFullscreen || elem.msRequestFullscreen;
+      if (!req) return;
+      // Rejects when not triggered by a user gesture, which is expected on an
+      // automatic start in a plain browser, so the rejection is swallowed.
+      try {
+        var result = req.call(elem);
+        if (result && typeof result.catch === 'function') {
+          result.catch(function () { /* gesture required */ });
         }
-      }
-    }
-    setInterval(updateClock, 1000);
-    updateClock();
-
-    function autoStart() {
-      if (hasStarted) return;
-      hasStarted = true;
-      startInterval();
-    }
-
-    function manualStart() {
-      if (hasStarted) return;
-      hasStarted = true;
-      startInterval();
-    }
-
-    function getEndTime() {
-      const [endHour, endMinute] = document.getElementById('endTime').value.split(":").map(Number);
-      const now = new Date();
-      const endTime = new Date(now);
-      endTime.setHours(endHour, endMinute, 0, 0);
-      return endTime;
-    }
-
-    function startInterval() {
-      const mins = parseInt(document.getElementById('minutes').value) || 0;
-      const secs = parseInt(document.getElementById('seconds').value) || 0;
-      intervalDuration = (mins * 60 + secs) * 1000;
-
-      if (intervalDuration <= 0) return;
-
-      const title = document.getElementById('timerName').value.trim();
-      if (title) {
-        document.getElementById('title').textContent = title;
-      }
-
-      document.getElementById('overlay').classList.add('hidden');
-      timerActive = true;
-      intervalStartTime = Date.now();
-      document.getElementById('timerDisplay').style.fontSize = '15rem';
-      runDriftFreeTimer();
-      requestFullscreen();
-      requestWakeLock();
-    }
-
-    function runDriftFreeTimer() {
-      function update() {
-        if (!timerActive) return;
-
-        const now = new Date();
-        const endTime = getEndTime();
-
-        if (now >= endTime) {
-          timerActive = false;
-          hasStarted = false;
-          exitFullscreen();
-          location.reload();
-          return;
-        }
-
-        const current = Date.now();
-        let elapsed = current - intervalStartTime;
-
-        if (elapsed >= intervalDuration) {
-          document.getElementById('alarmSound').play();
-          intervalStartTime += intervalDuration;
-          elapsed = 0;
-          showMessage();
-        }
-
-        const remaining = Math.max(0, intervalDuration - elapsed);
-        displayRemainingTime(remaining);
-        updateProgressBar(remaining);
-        requestAnimationFrame(update);
-      }
-
-      update();
-    }
-
-    function displayRemainingTime(ms) {
-      const totalSeconds = Math.floor(ms / 1000);
-      const mins = String(Math.floor(totalSeconds / 60)).padStart(2, '0');
-      const secs = String(totalSeconds % 60).padStart(2, '0');
-      document.getElementById('timerDisplay').textContent = `${mins}:${secs}`;
-    }
-
-    function updateProgressBar(remainingMs) {
-      const percent = (remainingMs / intervalDuration) * 100;
-      document.getElementById('progressBar').style.width = `${percent}%`;
-    }
-
-    function showMessage() {
-      const messageElement = document.getElementById('message');
-      messageElement.style.display = 'block';
-      setTimeout(() => {
-        messageElement.style.display = 'none';
-      }, 10000);
-    }
-
-    function requestFullscreen() {
-      const el = document.documentElement;
-      if (el.requestFullscreen) {
-        el.requestFullscreen();
-      } else if (el.webkitRequestFullscreen) {
-        el.webkitRequestFullscreen();
-      } else if (el.msRequestFullscreen) {
-        el.msRequestFullscreen();
-      }
+      } catch (err) { /* gesture required */ }
     }
 
     function exitFullscreen() {
-      if (document.exitFullscreen) {
-        document.exitFullscreen();
-      } else if (document.webkitExitFullscreen) {
-        document.webkitExitFullscreen();
-      } else if (document.msExitFullscreen) {
-        document.msExitFullscreen();
+      if (host && host.setFullscreen) { host.setFullscreen(false); return; }
+      if (!document.fullscreenElement && !document.webkitFullscreenElement) return;
+      var exit = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen;
+      if (!exit) return;
+      try {
+        var result = exit.call(document);
+        if (result && typeof result.catch === 'function') {
+          result.catch(function () {});
+        }
+      } catch (err) { /* already out of fullscreen */ }
+    }
+
+    function toggleFullscreen() {
+      if (isFullscreen()) exitFullscreen(); else enterFullscreen();
+    }
+
+    // ---------------------------------------------------------------------
+    // Display
+    // ---------------------------------------------------------------------
+
+    function setBodyState(next) {
+      body.classList.remove('idle', 'running', 'paused', 'finished');
+      body.classList.add(next);
+      state = next;
+    }
+
+    function displayRemaining(ms) {
+      var total = Math.ceil(ms / 1000);
+      var mins = Math.floor(total / 60);
+      var secs = total % 60;
+      el.timerDisplay.textContent = pad2(mins) + ':' + pad2(secs);
+    }
+
+    function updateProgress(remainingMs) {
+      var percent = intervalMs > 0 ? (remainingMs / intervalMs) * 100 : 0;
+      percent = Math.max(0, Math.min(100, percent));
+      // Animating backwards looks wrong, so the jump to a full bar at the
+      // start of each interval is applied without a transition.
+      if (percent > lastProgressPercent + 1) {
+        el.progressBar.classList.add('no-transition');
+        el.progressBar.style.width = percent + '%';
+        void el.progressBar.offsetWidth; // flush the style change
+        el.progressBar.classList.remove('no-transition');
+      } else {
+        el.progressBar.style.width = percent + '%';
+      }
+      lastProgressPercent = percent;
+    }
+
+    function showMessage() {
+      el.message.classList.add('show');
+      if (messageTimer) clearTimeout(messageTimer);
+      // Never hold the message across more than half an interval, so short
+      // intervals do not end up permanently covered by it.
+      var hold = Math.min(10000, Math.max(2000, intervalMs / 2));
+      messageTimer = setTimeout(function () {
+        el.message.classList.remove('show');
+        messageTimer = null;
+      }, hold);
+    }
+
+    function hideMessage() {
+      if (messageTimer) { clearTimeout(messageTimer); messageTimer = null; }
+      el.message.classList.remove('show');
+    }
+
+    function updateSessionInfo() {
+      if (state === 'idle') { el.sessionInfo.textContent = ''; return; }
+      if (state === 'finished') { el.sessionInfo.textContent = 'Session complete'; return; }
+
+      var label = 'Session ' + formatClockValue(el.startTime.value) +
+                  ' to ' + formatClockValue(el.endTime.value);
+      var left = sessionEndMs - Date.now();
+      if (left > 0) label += '  |  ' + formatDuration(left) + ' remaining';
+      if (state === 'paused') label += '  |  PAUSED';
+      el.sessionInfo.textContent = label;
+    }
+
+    // ---------------------------------------------------------------------
+    // The timer itself
+    //
+    // Everything is derived from Date.now() on each tick rather than from an
+    // accumulating counter, so the display stays correct even if ticks are
+    // delayed, throttled or skipped entirely while the window is hidden.
+    // ---------------------------------------------------------------------
+
+    function tick() {
+      var now = Date.now();
+      el.clock.textContent = new Date(now).toLocaleTimeString();
+
+      if (state === 'idle' || state === 'finished') {
+        updateAutoStartNotice(now);
+        maybeAutoStart(now);
+        return;
+      }
+
+      if (state === 'paused') {
+        updateSessionInfo();
+        return;
+      }
+
+      // running
+      if (now >= sessionEndMs) {
+        finishSession();
+        return;
+      }
+
+      var elapsed = now - anchorMs;
+
+      if (elapsed >= intervalMs) {
+        // Advance past every whole interval that has gone by. If the window
+        // was hidden for several intervals this catches up in a single step
+        // and rings once, rather than firing the alarm repeatedly.
+        var steps = Math.floor(elapsed / intervalMs);
+        anchorMs += steps * intervalMs;
+        elapsed = now - anchorMs;
+        ring();
+        showMessage();
+      }
+
+      var remaining = Math.max(0, intervalMs - elapsed);
+      displayRemaining(remaining);
+      updateProgress(remaining);
+      updateSessionInfo();
+    }
+
+    // ---------------------------------------------------------------------
+    // Automatic start
+    //
+    // The old check required a tick to land exactly on second zero of the
+    // start minute, which setInterval drift made unreliable. This arms only
+    // while the start time is still in the future and then fires on the first
+    // tick at or after it, so it cannot be missed.
+    // ---------------------------------------------------------------------
+
+    function armAutoStart() {
+      var now = Date.now();
+      var session = resolveSession(now);
+      autoStartArmed = !!(session && now < session.startMs && getIntervalMs() > 0);
+      updateAutoStartNotice(now);
+    }
+
+    function maybeAutoStart(now) {
+      if (!autoStartArmed) return;
+      var session = resolveSession(now);
+      if (!session) return;
+      if (now >= session.startMs && now < session.endMs) {
+        autoStartArmed = false;
+        start(session, now);
       }
     }
 
-document.addEventListener('dblclick', function (e) {
-  const setupPanel = document.getElementById('setupPanel');
+    function updateAutoStartNotice(now) {
+      if (state === 'running' || state === 'paused') {
+        el.autoStartNotice.textContent = '';
+        return;
+      }
+      var session = resolveSession(now);
+      if (!session || getIntervalMs() <= 0) {
+        el.autoStartNotice.textContent = '';
+        return;
+      }
+      if (autoStartArmed && now < session.startMs) {
+        el.autoStartNotice.textContent =
+          'Starts automatically in ' + formatDuration(session.startMs - now) + '.';
+      } else if (now >= session.startMs && now < session.endMs) {
+        el.autoStartNotice.textContent =
+          'The session window is already open. Press Manual Start to begin.';
+      } else {
+        el.autoStartNotice.textContent = '';
+      }
+    }
 
-  // If the double-click is outside the setup panel
-  if (!setupPanel.contains(e.target)) {
-    requestFullscreen();
-  }
-});
-    document.addEventListener('keydown', function(e) {
-      if (e.key === 'Escape') {
-        timerActive = false;
-        hasStarted = false;
-        exitFullscreen();
+    // ---------------------------------------------------------------------
+    // Transitions
+    // ---------------------------------------------------------------------
+
+    function start(session, now) {
+      intervalMs = getIntervalMs();
+      sessionStartMs = session.startMs;
+      sessionEndMs = session.endMs;
+
+      // Align the first interval to the session start, so an automatic start
+      // firing a fraction late still keeps whole intervals on the clock.
+      anchorMs = (now >= sessionStartMs && now - sessionStartMs < intervalMs)
+        ? sessionStartMs
+        : now;
+
+      el.title.textContent = el.timerName.value.trim() || DEFAULT_TITLE;
+
+      // Starts at 0 so the first update snaps the bar to full without
+      // animating, rather than sliding across.
+      lastProgressPercent = 0;
+      el.overlay.classList.add('hidden');
+      setBodyState('running');
+      el.remainingLabel.textContent = 'Time Remaining';
+      hideMessage();
+      updateButtons();
+
+      enterFullscreen();
+      requestWakeLock();
+      tick();
+    }
+
+    function manualStart() {
+      var now = Date.now();
+      var session = validate(now);
+      if (!session) return;
+      autoStartArmed = false;
+      start(session, now);
+    }
+
+    function pause() {
+      if (state !== 'running') return;
+      pauseStartedMs = Date.now();
+      setBodyState('paused');
+      updateButtons();
+      updateSessionInfo();
+    }
+
+    function resume() {
+      if (state !== 'paused') return;
+      // The session end is a wall-clock time and is deliberately not extended,
+      // but the current interval is shifted so it resumes where it left off.
+      anchorMs += Date.now() - pauseStartedMs;
+      setBodyState('running');
+      updateButtons();
+      tick();
+    }
+
+    function togglePause() {
+      if (state === 'running') pause();
+      else if (state === 'paused') resume();
+    }
+
+    function nextInterval() {
+      if (state !== 'running' && state !== 'paused') return;
+      anchorMs = Date.now();
+      if (state === 'paused') pauseStartedMs = anchorMs;
+      lastProgressPercent = 0;
+      ring();
+      showMessage();
+      tick();
+    }
+
+    function addMinute() {
+      if (state !== 'running' && state !== 'paused') return;
+      anchorMs += 60000;
+      tick();
+    }
+
+    function finishSession() {
+      setBodyState('finished');
+      hideMessage();
+      exitFullscreen();
+      releaseWakeLock();
+      el.timerDisplay.textContent = '00:00';
+      el.remainingLabel.textContent = 'Session Complete';
+      updateProgress(0);
+      openSetup();
+      el.sessionInfo.textContent = 'Session complete';
+    }
+
+    /**
+     * Return to the configuration panel. Unlike the previous version this does
+     * not reload the page, so the operator's settings survive.
+     */
+    function openSetup() {
+      if (state === 'running' || state === 'paused') {
+        setBodyState('idle');
         releaseWakeLock();
-        location.reload();
+      }
+      el.overlay.classList.remove('hidden');
+      el.title.textContent = el.timerName.value.trim() || DEFAULT_TITLE;
+      el.remainingLabel.textContent = 'Time Remaining';
+      hideMessage();
+      updateButtons();
+      armAutoStart();
+      updateAudioNotice();
+      setError('');
+      clearInvalid();
+    }
+
+    function updateButtons() {
+      el.btnPause.textContent = (state === 'paused') ? 'Resume' : 'Pause';
+      var live = (state === 'running' || state === 'paused');
+      el.btnPause.disabled = !live;
+      el.btnNext.disabled = !live;
+      el.btnAddMin.disabled = !live;
+    }
+
+    // ---------------------------------------------------------------------
+    // Events
+    // ---------------------------------------------------------------------
+
+    el.btnManualStart.addEventListener('click', manualStart);
+    el.btnPause.addEventListener('click', togglePause);
+    el.btnNext.addEventListener('click', nextInterval);
+    el.btnAddMin.addEventListener('click', addMinute);
+    el.btnSettings.addEventListener('click', openSetup);
+
+    ['timerName', 'minutes', 'seconds', 'startTime', 'endTime'].forEach(function (id) {
+      el[id].addEventListener('input', function () {
+        saveSettings();
+        armAutoStart();
+        if (el.setupError.textContent) validate(Date.now());
+      });
+    });
+
+    document.addEventListener('pointerdown', unlockAudio);
+    document.addEventListener('keydown', unlockAudio);
+
+    document.addEventListener('dblclick', function (e) {
+      if (!el.setupPanel.contains(e.target) && !e.target.closest('#controls')) {
+        toggleFullscreen();
       }
     });
+
+    document.addEventListener('keydown', function (e) {
+      // Leave typing in the setup fields alone.
+      var typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);
+
+      if (e.key === 'Escape') {
+        // The first Escape leaves fullscreen, a second returns to the settings
+        // panel. Neither discards the configuration any more.
+        if (isFullscreen()) {
+          exitFullscreen();
+        } else if (state === 'running' || state === 'paused') {
+          openSetup();
+        }
+        return;
+      }
+
+      if (e.key === 'Enter' && typing && !el.overlay.classList.contains('hidden')) {
+        e.preventDefault();
+        manualStart();
+        return;
+      }
+
+      if (typing) return;
+
+      if (e.key === ' ' || e.code === 'Space') {
+        e.preventDefault();
+        togglePause();
+      } else if (e.key === 'n' || e.key === 'N') {
+        nextInterval();
+      } else if (e.key === 'f' || e.key === 'F') {
+        toggleFullscreen();
+      }
+    });
+
+    // Reveal the control bar on mouse movement, then fade it out again so it
+    // does not sit over the display all evening.
+    document.addEventListener('mousemove', function () {
+      body.classList.add('controls-visible');
+      if (controlsTimer) clearTimeout(controlsTimer);
+      controlsTimer = setTimeout(function () {
+        body.classList.remove('controls-visible');
+      }, 3000);
+    });
+
+    // ---------------------------------------------------------------------
+    // Start up
+    // ---------------------------------------------------------------------
+
+    loadSettings();
+    setBodyState('idle');
+    updateButtons();
+    updateAudioNotice();
+    armAutoStart();
+    displayRemaining(0);
+    tick();
+    setInterval(tick, TICK_MS);
+  })();
   </script>
 </body>
 </html>

@@ -1,0 +1,57 @@
+{
+  "name": "meeting-timer",
+  "productName": "Meeting Timer",
+  "version": "2.0.0",
+  "description": "Interval timer for parents' evenings and other appointment sessions",
+  "main": "main.js",
+  "author": "St Mary's Ascot",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "test": "node test/check-packaging.js && electron test/smoke.js",
+    "test:packaging": "node test/check-packaging.js",
+    "prebuild": "node test/check-packaging.js",
+    "build": "electron-builder --win portable",
+    "build:installer": "electron-builder --win nsis"
+  },
+  "devDependencies": {
+    "electron": "^38.8.6",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "uk.sch.stmarysascot.meeting-timer",
+    "productName": "Meeting Timer",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "shell-bridge.js",
+      "index.html",
+      "Logo.png",
+      "Timer-Ding.wav",
+      "fonts/**/*",
+      "build/icon.png"
+    ],
+    "win": {
+      "target": [
+        "portable"
+      ],
+      "icon": "build/icon.png"
+    },
+    "portable": {
+      "artifactName": "Meeting Timer ${version}.exe"
+    },
+    "nsis": {
+      "artifactName": "Meeting Timer Setup ${version}.exe",
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "Meeting Timer"
+    }
+  }
+}
