@@ -14,7 +14,7 @@ browser.
 
 ### As a Windows app (no install)
 
-Double-click **`Meeting Timer 2.0.0.exe`**. Nothing is installed and nothing is
+Double-click **`Meeting Timer 2.1.0.exe`**. Nothing is installed and nothing is
 written outside the app's own settings; it can be run from a memory stick or a
 network share.
 
@@ -36,11 +36,31 @@ network connection. Two things behave slightly worse than in the app:
 
 1. Enter a name for the session, the length of one appointment, and the start
    and end times.
-2. Either leave it: the timer starts by itself at the start time; or press
-   **Manual Start** to begin immediately.
+2. Press **Arm** to have it start by itself at the start time, or
+   **Manual Start** to begin immediately. The chime sounds as the session
+   starts.
+
+   Once armed, the setup panel closes and the screen counts down to the first
+   chime, with **ARMED** shown underneath, so you can see at a glance that it
+   is ready. Press `Esc` or **Disarm** to go back and change something; the
+   panel then says it is no longer armed. Nothing starts by itself until you
+   press Arm. If the PC restarts while armed, the timer arms itself again when
+   it is reopened, as long as the start time has not passed.
 3. At the end of each appointment the chime sounds and the "please make your
    way to your next appointment" message appears.
 4. The session stops on its own at the end time.
+
+### Sound over HDMI
+
+HDMI audio goes to sleep when nothing is playing and takes a second or so to
+wake, which used to clip the start of the chime or lose it completely. While a
+session is waiting to start, waiting for Manual Start, running or paused, the
+timer plays a very quiet noise that you won't hear in the room but that keeps
+the audio link awake. It stops when the session ends.
+
+If the chime is still clipped, check the TV or receiver's own power-saving or
+"auto standby" settings. Some displays drop their audio on an idle timer no
+matter what the PC sends.
 
 Settings are remembered, so the next time it opens everything is as you left
 it.
@@ -165,6 +185,7 @@ Added:
 
 - Settings are remembered between runs.
 - Pause / resume, skip to next, and +1 minute.
-- A countdown to the automatic start, shown on the setup panel.
+- An explicit Arm step for the automatic start, with a full-screen countdown
+  to the first chime while armed.
 - A session line showing the window and how much of it is left.
 - Sessions may run past midnight.

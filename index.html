@@ -115,6 +115,7 @@
     }
 
     /* Enlarged display once the session is under way. */
+    body.armed #timerDisplay,
     body.running #timerDisplay,
     body.paused #timerDisplay {
       font-size: clamp(3rem, min(22vw, 30vh), 15rem);
@@ -201,6 +202,11 @@
     /* Nothing to control before a session starts or after it ends. */
     body.idle #controls,
     body.finished #controls { display: none; }
+
+    /* While armed the only thing to do is disarm. */
+    body.armed #btnPause,
+    body.armed #btnNext,
+    body.armed #btnAddMin { display: none; }
 
     #controls button { min-width: 7rem; }
 
@@ -305,6 +311,13 @@
       line-height: 1.6;
     }
 
+    .start-buttons {
+      display: flex;
+      gap: 0.75rem;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
     #autoStartNotice {
       margin: 0.75rem 0;
       font-size: 0.9rem;
@@ -388,11 +401,12 @@
       <div id="autoStartNotice"></div>
 
       <div class="hint">
-        The timer starts automatically at the start time, or press Manual Start to begin now.<br>
+        Press Arm to start automatically at the start time, or Manual Start to begin now.<br>
         <kbd>Space</kbd> pause &middot; <kbd>N</kbd> next &middot; <kbd>F</kbd> fullscreen &middot; <kbd>Esc</kbd> back to settings
       </div>
 
-      <div>
+      <div class="start-buttons">
+        <button id="btnArm" type="button">ARM &#9200;</button>
         <button id="btnManualStart" type="button">MANUAL START &#9654;&#65039;</button>
       </div>
 
@@ -415,6 +429,8 @@
     var DAY_MS = 86400000;
     var SETTINGS_KEY = 'meetingTimer.settings.v2';
     var DEFAULT_TITLE = "Parents' Meeting Timer";
+    var KEEP_ALIVE_GAIN = 0.0005;     // roughly -66 dB: inaudible, but not digital silence
+    var KEEP_ALIVE_WARMUP_MS = 1500;  // time for a sleeping HDMI link to come up
 
     var el = {
       title:           document.getElementById('title'),
@@ -435,6 +451,7 @@
       setupError:      document.getElementById('setupError'),
       audioNotice:     document.getElementById('audioNotice'),
       alarm:           document.getElementById('alarmSound'),
+      btnArm:          document.getElementById('btnArm'),
       btnManualStart:  document.getElementById('btnManualStart'),
       btnPause:        document.getElementById('btnPause'),
       btnNext:         document.getElementById('btnNext'),
@@ -452,14 +469,19 @@
     // State
     // ---------------------------------------------------------------------
 
-    var state = 'idle';          // idle | running | paused | finished
+    var state = 'idle';          // idle | armed | running | paused | finished
     var intervalMs = 0;          // length of one appointment
     var anchorMs = 0;            // wall-clock start of the current interval
     var sessionStartMs = 0;
     var sessionEndMs = 0;        // wall-clock end of the whole session
     var pauseStartedMs = 0;
-    var autoStartArmed = false;
+    var armedSession = null;     // the session an armed timer will start
     var audioUnlocked = false;
+    var audioCtx = null;
+    var keepAliveSource = null;
+    var keepAliveBuffer = null;
+    var audioRunningSince = 0;   // performance.now() when the context last began running
+    var pendingRing = null;
     var wakeLock = null;
     var messageTimer = null;
     var controlsTimer = null;
@@ -480,7 +502,10 @@
           minutes: el.minutes.value,
           seconds: el.seconds.value,
           startTime: el.startTime.value,
-          endTime: el.endTime.value
+          endTime: el.endTime.value,
+          // Remembered so an armed timer re-arms itself if the PC restarts
+          // before the session begins.
+          armed: state === 'armed'
         }));
       } catch (err) {
         // Storage can be unavailable (private mode, restricted profile). The
@@ -489,15 +514,16 @@
       }
     }
 
+    /** Restore the saved settings. Returns true if the timer was left armed. */
     function loadSettings() {
       var raw;
       try {
         raw = localStorage.getItem(SETTINGS_KEY);
       } catch (err) {
         console.warn('Could not read settings:', err);
-        return;
+        return false;
       }
-      if (!raw) return;
+      if (!raw) return false;
       try {
         var s = JSON.parse(raw);
         if (typeof s.name === 'string') el.timerName.value = s.name;
@@ -505,8 +531,10 @@
         if (typeof s.seconds === 'string') el.seconds.value = s.seconds;
         if (s.startTime) el.startTime.value = s.startTime;
         if (s.endTime) el.endTime.value = s.endTime;
+        return s.armed === true;
       } catch (err) {
         console.warn('Stored settings were unreadable:', err);
+        return false;
       }
     }
 
@@ -572,6 +600,15 @@
       var s = total % 60;
       return h > 0 ? h + 'h ' + pad2(m) + 'm ' + pad2(s) + 's'
                    : pad2(m) + 'm ' + pad2(s) + 's';
+    }
+
+    /** H:MM:SS for an hour or more, otherwise MM:SS. Rounds up, like the timer. */
+    function formatCountdown(ms) {
+      var total = Math.max(0, Math.ceil(ms / 1000));
+      var h = Math.floor(total / 3600);
+      var m = Math.floor((total % 3600) / 60);
+      var s = total % 60;
+      return h > 0 ? h + ':' + pad2(m) + ':' + pad2(s) : pad2(m) + ':' + pad2(s);
     }
 
     // ---------------------------------------------------------------------
@@ -647,6 +684,7 @@
     }
 
     function unlockAudio() {
+      resumeAudioContext();
       if (audioUnlocked) return;
       var previousVolume = el.alarm.volume;
       el.alarm.volume = 0;
@@ -694,6 +732,116 @@
       }
     }
 
+    function cancelPendingRing() {
+      if (pendingRing) { clearTimeout(pendingRing); pendingRing = null; }
+    }
+
+    /**
+     * Ring once the audio keep-alive has had time to wake the output, so a
+     * cold HDMI link does not swallow the start of the chime. Rings at once
+     * when the link is already warm or there is no keep-alive to wait for.
+     */
+    function ringWhenAudioWarm() {
+      cancelPendingRing();
+      var wait = 0;
+      if (keepAliveSource && audioCtx && audioCtx.state === 'running') {
+        wait = KEEP_ALIVE_WARMUP_MS - (performance.now() - audioRunningSince);
+      }
+      if (wait <= 0) { ring(); return; }
+      pendingRing = setTimeout(function () {
+        pendingRing = null;
+        if (state === 'running' || state === 'paused') ring();
+      }, wait);
+    }
+
+    // ---------------------------------------------------------------------
+    // Audio keep-alive
+    //
+    // HDMI audio (the GPU's audio device, and the TV or receiver behind it)
+    // goes to sleep when nothing is playing, and takes a second or so to
+    // wake. A chime played from cold was clipped or lost entirely. While a
+    // session is pending or running, a very quiet noise is played so the
+    // link stays up. Pure digital silence is not enough: many displays treat
+    // it as no signal and drop the link anyway.
+    // ---------------------------------------------------------------------
+
+    function getAudioContext() {
+      if (audioCtx) return audioCtx;
+      var Ctor = window.AudioContext || window.webkitAudioContext;
+      if (!Ctor) return null;
+      try {
+        audioCtx = new Ctor();
+      } catch (err) {
+        console.warn('Audio keep-alive unavailable:', err);
+        return null;
+      }
+      if (audioCtx.state === 'running') audioRunningSince = performance.now();
+      audioCtx.addEventListener('statechange', function () {
+        if (audioCtx.state === 'running') audioRunningSince = performance.now();
+      });
+      return audioCtx;
+    }
+
+    function resumeAudioContext() {
+      if (!audioCtx || !keepAliveSource || audioCtx.state === 'running') return;
+      // Rejected in a browser until the user has interacted with the page;
+      // unlockAudio tries again on the first click or key press.
+      audioCtx.resume().catch(function () {});
+    }
+
+    function startAudioKeepAlive() {
+      if (keepAliveSource) return;
+      var ctx = getAudioContext();
+      if (!ctx) return;
+
+      if (!keepAliveBuffer) {
+        var length = ctx.sampleRate * 2;
+        keepAliveBuffer = ctx.createBuffer(1, length, ctx.sampleRate);
+        var data = keepAliveBuffer.getChannelData(0);
+        for (var i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
+      }
+
+      var gain = ctx.createGain();
+      gain.gain.value = KEEP_ALIVE_GAIN;
+      var source = ctx.createBufferSource();
+      source.buffer = keepAliveBuffer;
+      source.loop = true;
+      source.connect(gain);
+      gain.connect(ctx.destination);
+      source.start();
+
+      keepAliveSource = source;
+      body.dataset.audioKeepAlive = 'on';
+      resumeAudioContext();
+    }
+
+    function stopAudioKeepAlive() {
+      if (!keepAliveSource) return;
+      try { keepAliveSource.stop(); } catch (err) { /* already stopped */ }
+      keepAliveSource.disconnect();
+      keepAliveSource = null;
+      body.dataset.audioKeepAlive = 'off';
+      // Suspending releases the output device, so the app does not hold the
+      // audio hardware open between sessions.
+      if (audioCtx && audioCtx.state === 'running') {
+        audioCtx.suspend().catch(function () {});
+      }
+    }
+
+    /**
+     * Keep the audio link up whenever a chime could be needed soon: while a
+     * session is armed, running or paused, and while the session window is
+     * open waiting for Manual Start.
+     */
+    function updateAudioKeepAlive(now) {
+      var wanted = state === 'armed' || state === 'running' || state === 'paused';
+      if (!wanted && getIntervalMs() > 0) {
+        var session = resolveSession(now);
+        wanted = !!(session && now >= session.startMs && now < session.endMs);
+      }
+      if (wanted) startAudioKeepAlive(); else stopAudioKeepAlive();
+    }
+
     // ---------------------------------------------------------------------
     // Screen wake lock
     //
@@ -729,7 +877,7 @@
 
     document.addEventListener('visibilitychange', function () {
       if (document.visibilityState === 'visible' &&
-          (state === 'running' || state === 'paused')) {
+          (state === 'armed' || state === 'running' || state === 'paused')) {
         requestWakeLock();
       }
     });
@@ -780,7 +928,7 @@
     // ---------------------------------------------------------------------
 
     function setBodyState(next) {
-      body.classList.remove('idle', 'running', 'paused', 'finished');
+      body.classList.remove('idle', 'armed', 'running', 'paused', 'finished');
       body.classList.add(next);
       state = next;
     }
@@ -831,6 +979,11 @@
 
       var label = 'Session ' + formatClockValue(el.startTime.value) +
                   ' to ' + formatClockValue(el.endTime.value);
+      if (state === 'armed') {
+        el.sessionInfo.textContent = 'ARMED  |  ' + label +
+          '  |  Starts automatically, press Esc to disarm';
+        return;
+      }
       var left = sessionEndMs - Date.now();
       if (left > 0) label += '  |  ' + formatDuration(left) + ' remaining';
       if (state === 'paused') label += '  |  PAUSED';
@@ -848,10 +1001,15 @@
     function tick() {
       var now = Date.now();
       el.clock.textContent = new Date(now).toLocaleTimeString();
+      updateAudioKeepAlive(now);
 
       if (state === 'idle' || state === 'finished') {
         updateAutoStartNotice(now);
-        maybeAutoStart(now);
+        return;
+      }
+
+      if (state === 'armed') {
+        tickArmed(now);
         return;
       }
 
@@ -888,31 +1046,67 @@
     // ---------------------------------------------------------------------
     // Automatic start
     //
+    // The timer only starts by itself once the operator has pressed Arm, so
+    // it is never left wondering whether it will. Armed, the setup panel
+    // closes and the display counts down to the first chime.
+    //
     // The old check required a tick to land exactly on second zero of the
-    // start minute, which setInterval drift made unreliable. This arms only
-    // while the start time is still in the future and then fires on the first
-    // tick at or after it, so it cannot be missed.
+    // start minute, which setInterval drift made unreliable. An armed timer
+    // starts on the first tick at or after the start time, so it cannot be
+    // missed.
     // ---------------------------------------------------------------------
 
-    function armAutoStart() {
+    /**
+     * Arm the timer to start itself at the start time. `quiet` is used when
+     * restoring an armed timer on launch, where a stale configuration should
+     * simply leave the setup panel open rather than report an error.
+     */
+    function arm(quiet) {
       var now = Date.now();
-      var session = resolveSession(now);
-      autoStartArmed = !!(session && now < session.startMs && getIntervalMs() > 0);
-      updateAutoStartNotice(now);
+      var session = quiet ? resolveSession(now) : validate(now);
+      if (!session || getIntervalMs() <= 0) return false;
+      if (now >= session.startMs) {
+        if (!quiet) {
+          el.startTime.classList.add('invalid');
+          setError('The start time has already passed. Press Manual Start to begin now.');
+        }
+        return false;
+      }
+
+      armedSession = session;
+      setBodyState('armed');
+      saveSettings();
+
+      el.title.textContent = el.timerName.value.trim() || DEFAULT_TITLE;
+      el.remainingLabel.textContent = 'First Chime In';
+      el.progressBar.style.width = '0';
+      el.overlay.classList.add('hidden');
+      hideMessage();
+      updateButtons();
+
+      enterFullscreen();
+      requestWakeLock();
+      tick();
+      return true;
     }
 
-    function maybeAutoStart(now) {
-      if (!autoStartArmed) return;
-      var session = resolveSession(now);
-      if (!session) return;
-      if (now >= session.startMs && now < session.endMs) {
-        autoStartArmed = false;
-        start(session, now);
+    function tickArmed(now) {
+      if (now >= armedSession.endMs) {
+        // Only reachable if the PC slept through the whole session.
+        openSetup();
+        setError('The session ended before the timer could start.');
+        return;
       }
+      if (now >= armedSession.startMs) {
+        start(armedSession, now);
+        return;
+      }
+      el.timerDisplay.textContent = formatCountdown(armedSession.startMs - now);
+      updateSessionInfo();
     }
 
     function updateAutoStartNotice(now) {
-      if (state === 'running' || state === 'paused') {
+      if (state !== 'idle' && state !== 'finished') {
         el.autoStartNotice.textContent = '';
         return;
       }
@@ -921,9 +1115,11 @@
         el.autoStartNotice.textContent = '';
         return;
       }
-      if (autoStartArmed && now < session.startMs) {
+      if (now < session.startMs) {
         el.autoStartNotice.textContent =
-          'Starts automatically in ' + formatDuration(session.startMs - now) + '.';
+          'Not armed. Press Arm to start automatically at ' +
+          formatClockValue(el.startTime.value) + ' (in ' +
+          formatDuration(session.startMs - now) + ').';
       } else if (now >= session.startMs && now < session.endMs) {
         el.autoStartNotice.textContent =
           'The session window is already open. Press Manual Start to begin.';
@@ -953,7 +1149,9 @@
       // animating, rather than sliding across.
       lastProgressPercent = 0;
       el.overlay.classList.add('hidden');
+      armedSession = null;
       setBodyState('running');
+      saveSettings();
       el.remainingLabel.textContent = 'Time Remaining';
       hideMessage();
       updateButtons();
@@ -961,13 +1159,16 @@
       enterFullscreen();
       requestWakeLock();
       tick();
+
+      // The first appointment is called in with the chime, like every later
+      // one. tick() has already started the keep-alive if it was not running.
+      ringWhenAudioWarm();
     }
 
     function manualStart() {
       var now = Date.now();
       var session = validate(now);
       if (!session) return;
-      autoStartArmed = false;
       start(session, now);
     }
 
@@ -1011,6 +1212,7 @@
     }
 
     function finishSession() {
+      cancelPendingRing();
       setBodyState('finished');
       hideMessage();
       exitFullscreen();
@@ -1024,11 +1226,16 @@
 
     /**
      * Return to the configuration panel. Unlike the previous version this does
-     * not reload the page, so the operator's settings survive.
+     * not reload the page, so the operator's settings survive. An armed timer
+     * is disarmed, and the panel says so.
      */
     function openSetup() {
-      if (state === 'running' || state === 'paused') {
+      if (state === 'armed' || state === 'running' || state === 'paused') {
+        if (state === 'armed') displayRemaining(0);
+        cancelPendingRing();
+        armedSession = null;
         setBodyState('idle');
+        saveSettings();
         releaseWakeLock();
       }
       el.overlay.classList.remove('hidden');
@@ -1036,7 +1243,9 @@
       el.remainingLabel.textContent = 'Time Remaining';
       hideMessage();
       updateButtons();
-      armAutoStart();
+      updateSessionInfo();
+      updateAutoStartNotice(Date.now());
+      updateAudioKeepAlive(Date.now());
       updateAudioNotice();
       setError('');
       clearInvalid();
@@ -1048,12 +1257,14 @@
       el.btnPause.disabled = !live;
       el.btnNext.disabled = !live;
       el.btnAddMin.disabled = !live;
+      el.btnSettings.textContent = (state === 'armed') ? 'Disarm' : 'Settings';
     }
 
     // ---------------------------------------------------------------------
     // Events
     // ---------------------------------------------------------------------
 
+    el.btnArm.addEventListener('click', function () { arm(false); });
     el.btnManualStart.addEventListener('click', manualStart);
     el.btnPause.addEventListener('click', togglePause);
     el.btnNext.addEventListener('click', nextInterval);
@@ -1063,7 +1274,7 @@
     ['timerName', 'minutes', 'seconds', 'startTime', 'endTime'].forEach(function (id) {
       el[id].addEventListener('input', function () {
         saveSettings();
-        armAutoStart();
+        updateAutoStartNotice(Date.now());
         if (el.setupError.textContent) validate(Date.now());
       });
     });
@@ -1086,7 +1297,7 @@
         // panel. Neither discards the configuration any more.
         if (isFullscreen()) {
           exitFullscreen();
-        } else if (state === 'running' || state === 'paused') {
+        } else if (state === 'armed' || state === 'running' || state === 'paused') {
           openSetup();
         }
         return;
@@ -1124,14 +1335,18 @@
     // Start up
     // ---------------------------------------------------------------------
 
-    loadSettings();
+    var wasArmed = loadSettings();
     setBodyState('idle');
+    body.dataset.audioKeepAlive = 'off';
     updateButtons();
     updateAudioNotice();
-    armAutoStart();
     displayRemaining(0);
     tick();
     setInterval(tick, TICK_MS);
+
+    // Re-arm after a restart if the session has not started yet. Otherwise
+    // clear the stale flag and leave the setup panel open.
+    if (wasArmed && !arm(true)) saveSettings();
   })();
   </script>
 </body>

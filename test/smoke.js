@@ -12,12 +12,23 @@
  *   npm test
  */
 
+const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { app, BrowserWindow } = require('electron');
 const bridge = require('../shell-bridge');
 
 const ROOT = path.join(__dirname, '..');
 const INTERVAL_S = 20;
+
+// A fresh profile for every run. The page restores its settings, including
+// an armed timer, before the test can clear them, so state left in a shared
+// profile by an earlier run would otherwise leak into this one.
+const PROFILE = fs.mkdtempSync(path.join(os.tmpdir(), 'meeting-timer-test-'));
+app.setPath('userData', PROFILE);
+app.on('quit', () => {
+  try { fs.rmSync(PROFILE, { recursive: true, force: true }); } catch (e) { /* still locked */ }
+});
 
 let failures = 0;
 let checks = 0;
@@ -76,6 +87,33 @@ app.whenReady().then(async () => {
       window.__rings = 0;
       var alarm = document.getElementById('alarmSound');
       alarm.play = function () { window.__rings++; return Promise.resolve(); };
+
+      // Capture the page's AudioContext when the keep-alive next builds its
+      // source, so the test can see whether the context is really running.
+      window.__audioCtx = null;
+      var realCreateSource = AudioContext.prototype.createBufferSource;
+      AudioContext.prototype.createBufferSource = function () {
+        window.__audioCtx = this;
+        return realCreateSource.apply(this, arguments);
+      };
+      window.__audio = function () {
+        return {
+          keepAlive: document.body.dataset.audioKeepAlive,
+          ctxState: window.__audioCtx ? window.__audioCtx.state : 'none'
+        };
+      };
+      window.__waitForRings = function (n, timeoutMs) {
+        return new Promise(function (resolve) {
+          var started = performance.now();
+          (function poll() {
+            if (window.__rings >= n || performance.now() - started > timeoutMs) {
+              resolve(window.__rings);
+            } else {
+              setTimeout(poll, 50);
+            }
+          })();
+        });
+      };
 
       window.__set = function (id, value) {
         var el = document.getElementById(id);
@@ -160,6 +198,9 @@ app.whenReady().then(async () => {
   s = await state();
   check('an end time in the past is refused with an explanation', /already passed/i.test(s.error), JSON.stringify(s.error));
   check('the page did not reload or blank', s.overlayHidden === false);
+  await sleep(300);
+  check('audio keep-alive is off with no session pending',
+    (await run(`window.__audio()`)).keepAlive === 'off', JSON.stringify(await run(`window.__audio()`)));
 
   // =========================================================================
   section('Validation: interval longer than the session');
@@ -175,7 +216,20 @@ app.whenReady().then(async () => {
   check('an over-long interval is refused', /longer than the whole session/i.test(s.error), JSON.stringify(s.error));
 
   // =========================================================================
-  section('Automatic start (bug: missed when the tick skipped second zero)');
+  section('Validation: arming after the start time');
+  // =========================================================================
+  await run(`
+    window.__set('minutes', '5');
+    window.__set('startTime', window.__hhmm(-10));
+    window.__set('endTime', window.__hhmm(50));
+  `);
+  await run(`window.__click('btnArm')`);
+  s = await state();
+  check('arming is refused once the start time has passed', /start time has already passed/i.test(s.error), JSON.stringify(s.error));
+  check('a refused arm leaves the setup panel open', s.overlayHidden === false && /\bidle\b/.test(s.cls), s.cls);
+
+  // =========================================================================
+  section('Arming');
   // =========================================================================
   await run(`
     window.__set('timerName', 'Year 9 Parents Evening');
@@ -186,12 +240,55 @@ app.whenReady().then(async () => {
   `);
   await sleep(300);
   s = await state();
-  check('setup panel shows the automatic start countdown', /Starts automatically in/i.test(s.notice), JSON.stringify(s.notice));
-  check('keep-awake is not engaged before the timer starts', bridge.isKeepAwakeActive() === false);
+  check('setup panel says the timer is not armed yet', /Not armed/i.test(s.notice), JSON.stringify(s.notice));
+  check('keep-awake is not engaged before arming', bridge.isKeepAwakeActive() === false);
+  check('audio keep-alive is off before arming', (await run(`window.__audio()`)).keepAlive === 'off');
 
+  // Without Arm, reaching the start time must not start anything.
+  const skip = await run(`(function () { var ms = window.__msUntilStart() + 1500; window.__advance(ms); return ms; })()`);
+  await sleep(400);
+  s = await state();
+  check('an unarmed timer does not start by itself', /\bidle\b/.test(s.cls) && s.overlayHidden === false, s.cls);
+  await run(`window.__advance(-${skip})`);
+  await sleep(300);
+
+  await run(`window.__click('btnArm')`);
+  await sleep(300);
+  s = await state();
+  check('arm switches to the armed state', /\barmed\b/.test(s.cls), s.cls);
+  check('arm closes the setup panel', s.overlayHidden === true);
+  check('armed display is labelled as the countdown to the first chime',
+    (await run(`window.__text('remainingLabel')`)) === 'First Chime In');
+  check('armed display counts down to the start time', /^0[45]:\d{2}$/.test(s.display), s.display);
+  check('armed state is announced in the session line', /ARMED/.test(s.sessionInfo), s.sessionInfo);
+  check('keep-awake engaged while armed', bridge.isKeepAwakeActive() === true);
+
+  await run(`window.__click('btnSettings')`);
+  await sleep(300);
+  s = await state();
+  check('disarming returns to the setup panel', /\bidle\b/.test(s.cls) && s.overlayHidden === false, s.cls);
+  check('the setup panel says it is no longer armed', /Not armed/i.test(s.notice), JSON.stringify(s.notice));
+  check('keep-awake released on disarm', bridge.isKeepAwakeActive() === false);
+
+  await run(`window.__click('btnArm')`);
+  await run(`window.__advance(window.__msUntilStart() - 10000)`);
+  await sleep(400);
+  s = await state();
+  check('countdown reaches the last seconds before the start', /^00:(09|10)$/.test(s.display), s.display);
+
+  // =========================================================================
+  section('Audio keep-alive (bug: a sleeping HDMI link clipped the chime)');
+  // =========================================================================
+  let audio = await run(`window.__audio()`);
+  check('audio keep-alive is on while armed', audio.keepAlive === 'on', JSON.stringify(audio));
+  check('the keep-alive audio context is actually running', audio.ctxState === 'running', JSON.stringify(audio));
+
+  // =========================================================================
+  section('Automatic start (bug: missed when the tick skipped second zero)');
+  // =========================================================================
   // Land 1.5s past the start instant, deliberately off a whole second: the old
   // "seconds === 0" check would have missed this entirely.
-  await run(`window.__advance(window.__msUntilStart() + 1500)`);
+  await run(`window.__rings = 0; window.__advance(window.__msUntilStart() + 1500)`);
   await sleep(400);
   s = await state();
   check('timer started automatically', /\brunning\b/.test(s.cls), s.cls);
@@ -203,6 +300,13 @@ app.whenReady().then(async () => {
   let left = await remaining();
   check('first interval is aligned to the session start time',
     between(left, INTERVAL_S - 3, INTERVAL_S - 1), `${left}s of ${INTERVAL_S}s`);
+
+  // The start chime may wait out the keep-alive warm-up, so poll for it.
+  const startRings = await run(`window.__waitForRings(1, 3000)`);
+  check('the chime sounds when the session starts', startRings === 1, `rings=${startRings}`);
+  await sleep(300);
+  check('the start chime sounds only once', (await run(`window.__rings`)) === 1);
+  check('audio keep-alive stays on while running', (await run(`window.__audio()`)).keepAlive === 'on');
 
   // =========================================================================
   section('Interval rollover and the alarm');
@@ -271,6 +375,10 @@ app.whenReady().then(async () => {
   check('setup panel reopens at the end', s.overlayHidden === false);
   check('end of session is announced', /complete/i.test(s.sessionInfo), s.sessionInfo);
   check('keep-awake released at the end of the session', bridge.isKeepAwakeActive() === false);
+  await sleep(300);
+  audio = await run(`window.__audio()`);
+  check('audio keep-alive stops at the end of the session', audio.keepAlive === 'off', JSON.stringify(audio));
+  check('the audio device is released at the end of the session', audio.ctxState === 'suspended', JSON.stringify(audio));
 
   const kept = await run(`({
     name: document.getElementById('timerName').value,
@@ -284,8 +392,28 @@ app.whenReady().then(async () => {
   // =========================================================================
   section('Settings persistence across a restart');
   // =========================================================================
+  // Leave it armed for a session in the future, as if the PC restarted while
+  // waiting for the evening to begin.
+  await run(`
+    window.__set('startTime', window.__hhmm(5));
+    window.__set('endTime', window.__hhmm(65));
+    window.__click('btnArm');
+  `);
   win.webContents.reload();
   await new Promise((resolve) => win.webContents.once('did-finish-load', resolve));
+  await sleep(300);
+
+  const rearmed = await run(`({
+    cls: document.body.className,
+    overlayHidden: document.getElementById('overlay').classList.contains('hidden')
+  })`);
+  check('an armed timer re-arms itself after a restart',
+    /\barmed\b/.test(rearmed.cls) && rearmed.overlayHidden === true, rearmed.cls);
+  await run(`document.getElementById('btnSettings').click()`);
+  // Arming went fullscreen; leave it so the bridge checks start from scratch.
+  // The hidden test window does not echo the change, so push it as well.
+  win.setFullScreen(false);
+  win.webContents.send('timer:fullscreen-changed', false);
   await sleep(300);
 
   const restored = await run(`({
